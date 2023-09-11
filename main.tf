@@ -1,55 +1,29 @@
-data "aws_ami" "app_ami" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["bitnami-tomcat-*-x86_64-hvm-ebs-nami"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  owners = ["979382823631"] # Bitnami
+provider "aws" {
+  profile = "default"
+  region  = "us-east-1"
 }
 
-module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
-
-  name = "dev"
-  cidr = "10.0.0.0/16"
-
-  azs             = ["us-west-1a", "us-west-1b", "us-west-1c"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
-
-  tags = {
-    Terraform = "true"
-    Environment = "dev"
-  }
+resource "aws_rds_cluster" "ts_cluster" {
+  cluster_identifier              = "my-aurora-cluster"
+  engine                          = "aurora-postgresql"
+  master_username                 = "postgres"
+  master_password                 = "password"
+  skip_final_snapshot             = true
+  vpc_security_group_ids          = ["ssg-05bdf8bfbd66de4e5"]  # Your existing security group
+  db_subnet_group_name            = "tssubnetgroup" # Your existing DB subnet group name
+  availability_zones              = ["us-east-1a", "us-east-1b"]    # Adjust based on your region and available zones
 }
 
-resource "aws_instance" "blog" {
-  ami           = data.aws_ami.app_ami.id
-  instance_type = var.instance_type
-
-vpc_security_group_ids = [module.blog_sg.security_group_id]
-
-  tags = {
-    Name = "HelloWorld"
-  }
+resource "aws_rds_cluster_instance" "aurora_instance" {
+  cluster_identifier              = aws_rds_cluster.ts_cluster.id
+  identifier                      = "my-aurora-instance-ts"
+  instance_class                  = "db.t2.small"
+  engine                          = "aurora-postgresql"
+  publicly_accessible             = false
+  db_subnet_group_name            = "tssubnetgroup"  # Your existing DB subnet group name
 }
 
-module "blog_sg" {
-  source  = "terraform-aws-modules/security-group/aws"
-  version = "5.1.0"
-
-  name = "blog_new"
-  vpc_id = module.vpc.public_subnets[0]
-
-  ingress_rules = ["http-80-tcp", "https-443-tcp"]
-  ingress_cidr_blocks = ["0.0.0.0/0"]
-
-  egress_rules = ["http-80-tcp", "https-443-tcp"]
-  egress_cidr_blocks = ["0.0.0.0/0"]
+# Output the endpoint for connection
+output "aurora_endpoint" {
+  value = aws_rds_cluster.ts_cluster.endpoint
 }
